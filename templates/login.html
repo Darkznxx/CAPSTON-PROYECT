@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Login - Burnout WebApp</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <style>
+        body {
+            background: linear-gradient(135deg, #3498db, #8e44ad);
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Segoe UI', sans-serif;
+        }
+
+        .login-card {
+            background: #fff;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+            padding: 2.5rem;
+            width: 100%;
+            max-width: 400px;
+            transition: all 0.3s ease;
+        }
+
+        .login-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 30px rgba(0,0,0,0.2);
+        }
+
+        .login-title {
+            color: #2c3e50;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+        }
+
+        .btn-login {
+            background: linear-gradient(135deg, #3498db, #2ecc71);
+            border: none;
+            transition: background 0.3s ease;
+        }
+
+        .btn-login:hover {
+            background: linear-gradient(135deg, #2980b9, #27ae60);
+        }
+
+        .btn-register {
+            background: linear-gradient(135deg, #8e44ad, #3498db);
+            border: none;
+            color: #fff;
+            margin-top: 10px;
+            width: 100%;
+            transition: background 0.3s ease;
+        }
+
+        .btn-register:hover {
+            background: linear-gradient(135deg, #732d91, #2980b9);
+        }
+
+        .form-control {
+            border-radius: 8px;
+        }
+
+        .error {
+            color: #e74c3c;
+            margin-top: 10px;
+            font-size: 0.9rem;
+        }
+
+        footer {
+            text-align: center;
+            color: #fff;
+            font-size: 0.9rem;
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="login-card">
+        <h3 class="text-center login-title">Iniciar Sesión</h3>
+        <form method="POST" action="{{ url_for('login') }}">
+            <div class="mb-3">
+                <input type="text" class="form-control" name="username" placeholder="Usuario" required>
+            </div>
+            <div class="mb-3">
+                <input type="password" class="form-control" name="password" placeholder="Contraseña" required>
+            </div>
+            <button type="submit" class="btn btn-login w-100 text-white py-2">Entrar</button>
+        </form>
+
+        <!-- Botón Registrarte  -->
+        <button onclick="window.location.href='{{ url_for('register') }}'" class="btn btn-register py-2">
+            Registrarte
+        </button>
+
+        {% if error %}
+            <div class="error text-center">{{ error }}</div>
+        {% endif %}
+    </div>
+
+    <footer>
+        <p>© 2025 Burnout WebApp - Todos los derechos reservados</p>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
