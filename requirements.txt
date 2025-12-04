@@ -43,7 +43,8 @@ requests==2.32.3
 imbalanced-learn==0.12.3
 sib_api_v3_sdk==7.6.0
 mord==0.6
-libgomp
+
+
 
 
 
