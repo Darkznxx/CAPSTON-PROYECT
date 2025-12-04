@@ -877,7 +877,7 @@ def enviar_pdf_correo():
         api_instance = sib_api_v3_sdk.TransactionalEmailsApi(sib_api_v3_sdk.ApiClient(configuration))
 
         subject = "📄 Reporte de Predicción de Burnout"
-        sender = {"name": "Sistema Capston2", "email": "tusistema@empresa.com"}git push
+        sender = {"name": "Sistema Capston2", "email": "tusistema@empresa.com"}
 
         send_smtp_email = sib_api_v3_sdk.SendSmtpEmail(
             to=to,
