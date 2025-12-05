@@ -52,58 +52,6 @@ except Exception as e:
 
 
 # =========================================================
-#               Inicializar SHAP
-# =========================================================
-explainer = None
-try:
-    import shap
-    import traceback
-    from sklearn.ensemble import RandomForestClassifier
-    from sklearn.calibration import CalibratedClassifierCV
-    from sklearn.pipeline import Pipeline
-
-    print("🧩 Iniciando carga de SHAP...")
-
-    if os.path.exists(SHAP_PATH):
-        try:
-            explainer = joblib.load(SHAP_PATH)
-            print("✅ SHAP Explainer cargado correctamente desde archivo.")
-        except Exception as e_load:
-            print("⚠️ Archivo shap_explanation.pkl incompatible o corrupto. Se regenerará.")
-            os.remove(SHAP_PATH)
-            raise e_load
-
-    if explainer is None and pipeline is not None:
-        clf = getattr(pipeline, "named_steps", {}).get("clf", pipeline)
-        print("🔍 Tipo de modelo detectado:", type(clf).__name__)
-
-        #  Si es un modelo calibrado, obtener el estimador base
-        if isinstance(clf, CalibratedClassifierCV):
-            base_model = getattr(clf, "base_estimator", getattr(clf, "estimator", None))
-            print("🧠 Modelo base detectado dentro del calibrador:", type(base_model).__name__)
-        else:
-            base_model = clf
-
-        #  Si el modelo base es un Pipeline, extraer su clasificador final
-        if isinstance(base_model, Pipeline):
-            inner_clf = getattr(base_model, "named_steps", {}).get("clf", base_model)
-            print("🧩 Clasificador interno detectado:", type(inner_clf).__name__)
-        else:
-            inner_clf = base_model
-
-        #  Generar el explainer si el clasificador interno es Random Forest
-        if isinstance(inner_clf, RandomForestClassifier):
-            print("⚙️ Generando nuevo SHAP TreeExplainer para Random Forest (modo compatibilidad)...")
-            explainer = shap.TreeExplainer(inner_clf)
-            joblib.dump(explainer, SHAP_PATH)
-            print("✅ Nuevo SHAP Explainer generado y guardado.")
-        else:
-            print("⚠️ El clasificador interno no es Random Forest, SHAP no se inicializa.")
-except Exception as e:
-    print("❌ Error al cargar o inicializar SHAP:", e)
-    traceback.print_exc()
-
-# =========================================================
 #          INTERPRETACIÓN TEXTUAL DE SHAP 
 # =========================================================
 
@@ -488,13 +436,16 @@ def usuario_trabajadores():
 
 
 # =========================================================
-#                 PREDICCIÓN 
+#                 PREDICCIÓN + SHAP DINÁMICO
 # =========================================================
 @app.route("/predict", methods=["POST"])
 def predict():
     try:
         data = request.get_json()
 
+        # ----------------------------------------------------
+        # Normalizar valores de los 16 ítems del test
+        # ----------------------------------------------------
         for i in range(1, 17):
             key = f"item{i}"
             try:
@@ -502,89 +453,89 @@ def predict():
             except:
                 data[key] = None
 
+        # Construir input EXACTO como el modelo fue entrenado
         X_input = pd.DataFrame([{k: data.get(k, None) for k in FEATURES}])
 
+        # Reparar edad_num si está vacía
         if "edad_num" in X_input.columns:
             if X_input["edad_num"].isna().all() or (X_input["edad_num"] == "").all():
-                X_input["edad_num"] = 35  
+                X_input["edad_num"] = 35
         else:
             X_input["edad_num"] = 35
 
+        # ----------------------------------------------------
+        #               1) PREDICCIÓN
+        # ----------------------------------------------------
         pred = pipeline.predict(X_input)[0]
         proba = pipeline.predict_proba(X_input)[0].tolist()
 
         pred_label = REVERSE_LABEL_MAP.get(pred, "Clase no encontrada")
+        probabilities = {REVERSE_LABEL_MAP[i]: float(p) for i, p in enumerate(proba)}
 
-        probabilities = {REVERSE_LABEL_MAP[i]: float(prob) for i, prob in enumerate(proba)}
-
-        # =========================================================
-        # ✅ SHAP: explicación del modelo
-        # =========================================================
+        # ----------------------------------------------------
+        #               2) SHAP DINÁMICO
+        # ----------------------------------------------------
         shap_values = None
+        resumen_shap = "No se generó interpretación SHAP."
+
         try:
-            from sklearn.calibration import CalibratedClassifierCV
-            from sklearn.pipeline import Pipeline
-            from sklearn.ensemble import RandomForestClassifier
+            import shap
 
-            clf = getattr(pipeline, "named_steps", {}).get("clf", pipeline)
+            # Ruta del background.csv que subiste al repo
+            bg_path = os.path.join(BASE_DIR, "background.csv")
+            df_bg = pd.read_csv(bg_path)
 
-            if isinstance(clf, CalibratedClassifierCV):
-                base_model = getattr(clf, "base_estimator", getattr(clf, "estimator", None))
+            # Transformar background con tu preprocesador
+            bg_trans = preprocessor.transform(df_bg)
+
+            # Explainer universal para cualquier modelo
+            explainer_dyn = shap.KernelExplainer(
+                lambda x: pipeline.predict(x),
+                bg_trans
+            )
+
+            # Transformación del input real
+            X_trans = preprocessor.transform(X_input)
+
+            # Calcular SHAP
+            shap_raw = explainer_dyn.shap_values(X_trans)
+
+            # Si SHAP devuelve lista (multiclase) → usar clase predicha
+            if isinstance(shap_raw, list):
+                c = int(pred)
+                shap_for_instance = shap_raw[c][0]
             else:
-                base_model = clf
+                shap_for_instance = shap_raw[0]
 
-            if isinstance(base_model, Pipeline):
-                inner_clf = getattr(base_model, "named_steps", {}).get("clf", base_model)
-            else:
-                inner_clf = base_model
+            shap_values = shap_for_instance.tolist()
 
-            if isinstance(inner_clf, RandomForestClassifier) and explainer is not None:
-                X_trans = (
-                    pipeline.named_steps["pre"].transform(X_input)
-                    if "pre" in pipeline.named_steps
-                    else X_input
-                )
+            # ----------------------------------------------------
+            # Construcción de interpretación textual
+            # ----------------------------------------------------
+            explicaciones = []
+            for i, f in enumerate(FEATURES):
+                if i >= len(shap_for_instance):
+                    break
+                valor = X_input.iloc[0][f]
+                impacto = float(shap_for_instance[i])
+                explicaciones.append((f, valor, impacto))
 
-                shap_values_raw = explainer.shap_values(X_trans)
+            resumen_shap = resumen_para_RRHH(
+                explicaciones,
+                pred_label=pred_label,
+                top_n=5,
+                objetivo="nivel de burnout"
+            )
 
-                if isinstance(shap_values_raw, list):
-                        shap_values = np.mean(np.abs(shap_values_raw), axis=0)
-                        shap_values = shap_values.flatten().tolist()
-                else:
-                        shap_values = np.abs(shap_values_raw).flatten().tolist()
+            print("✅ SHAP dinámico generado correctamente.")
 
-                print("✅ SHAP calculado correctamente.")
+        except Exception as e_shap:
+            print("⚠️ Error generando SHAP dinámico:", e_shap)
 
-                # =========================================================
-                #           Interpretación textual de SHAP
-                # =========================================================
-                resumen_shap = ""
-                try:
-                    if shap_values and isinstance(shap_values, list):
-                        explicaciones = []
-                        for i, f in enumerate(FEATURES):
-                            val = X_input.iloc[0][f]
-                            sv = shap_values[i] if i < len(shap_values) else 0
-                            explicaciones.append((f, val, sv))
 
-                        resumen_shap = resumen_para_RRHH(explicaciones, pred_label=pred_label, top_n=5)
-                    else:
-                        resumen_shap = "No se pudieron generar interpretaciones SHAP válidas."
-                except Exception as e:
-                    print("⚠️ Error interpretando SHAP:", e)
-                    resumen_shap = "Error durante la interpretación de los valores SHAP."
-
-            else:
-                print("⚠️ No se encontró RandomForestClassifier válido para SHAP.")
-                shap_values = None
-
-        except Exception as shap_error:
-            print("⚠️ Error SHAP:", shap_error)
-            shap_values = None
-
-        # =========================================================
-        #         GUARDAR EN BD EN SQLITE 
-        # =========================================================
+        # ----------------------------------------------------
+        #         3) GUARDAR EL REGISTRO EN LA BD
+        # ----------------------------------------------------
         conn = sqlite3.connect("database.db")
         cursor = conn.cursor()
 
@@ -629,22 +580,10 @@ def predict():
             data.get("correo"),
             data.get("sector"),
             data.get("antiguedad"),
-            data.get("item1"),
-            data.get("item2"),
-            data.get("item3"),
-            data.get("item4"),
-            data.get("item5"),
-            data.get("item6"),
-            data.get("item7"),
-            data.get("item8"),
-            data.get("item9"),
-            data.get("item10"),
-            data.get("item11"),
-            data.get("item12"),
-            data.get("item13"),
-            data.get("item14"),
-            data.get("item15"),
-            data.get("item16"),
+            data.get("item1"), data.get("item2"), data.get("item3"), data.get("item4"),
+            data.get("item5"), data.get("item6"), data.get("item7"), data.get("item8"),
+            data.get("item9"), data.get("item10"), data.get("item11"), data.get("item12"),
+            data.get("item13"), data.get("item14"), data.get("item15"), data.get("item16"),
             pred_label,
             str(probabilities),
             datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -653,6 +592,9 @@ def predict():
         conn.commit()
         conn.close()
 
+        # ----------------------------------------------------
+        #            4) RESPUESTA AL FRONTEND
+        # ----------------------------------------------------
         return jsonify({
             "prediction": pred_label,
             "probabilities": probabilities,
@@ -664,6 +606,7 @@ def predict():
         print("❌ Error en predicción:", e)
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
 
 
 
